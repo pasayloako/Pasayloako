@@ -5,7 +5,7 @@ module.exports = {
   meta: {
     name: "SMS Bomber",
     description: "Send bulk SMS to a target phone number for testing purposes",
-    author: "Kenneth Panio",
+    author: "Jaybohol",
     version: "1.0.0",
     category: "tools",
     method: "GET",
@@ -14,26 +14,50 @@ module.exports = {
   
   onStart: async function({ req, res }) {
     try {
-      let { phone, times, number, count, amount } = req.query;
+      // Both parameters are required - support multiple parameter names
+      let targetPhone = req.query.Number || req.query.phone || req.query.number;
+      let smsCount = req.query.amount || req.query.times || req.query.count;
       
-      // Support multiple parameter names for phone number
-      let targetPhone = phone || number;
-      
-      // Support multiple parameter names for SMS count
-      let smsCount = times || count || amount;
-      smsCount = parseInt(smsCount, 10) || 100;
-      
-      // Validate phone number
+      // Validate both parameters are present
       if (!targetPhone) {
         return res.status(400).json({
           status: false,
           error: "Phone number is required",
           usage: {
-            example: "/smsbomber?phone=09276547755&times=10",
-            parameters: {
-              phone: "Philippine phone number (supports +63, 63, 09, or 9 formats)",
-              times: "Number of SMS to send (default: 100, max: 500)"
+            example: "/smsbomber?Number=09916527333&amount=1",
+            required_params: {
+              Number: "Philippine phone number (supports +63, 63, 09, or 9 formats)",
+              amount: "Number of SMS to send (1-500)"
             }
+          }
+        });
+      }
+      
+      if (!smsCount) {
+        return res.status(400).json({
+          status: false,
+          error: "Amount parameter is required",
+          usage: {
+            example: "/smsbomber?Number=09916527333&amount=1",
+            required_params: {
+              Number: "Philippine phone number",
+              amount: "Number of SMS to send (1-500)"
+            }
+          }
+        });
+      }
+      
+      // Parse and validate SMS count
+      smsCount = parseInt(smsCount, 10);
+      
+      if (isNaN(smsCount)) {
+        return res.status(400).json({
+          status: false,
+          error: "Invalid amount parameter",
+          details: {
+            received: req.query.amount,
+            message: "Amount must be a valid number",
+            example: "amount=10"
           }
         });
       }
@@ -57,13 +81,13 @@ module.exports = {
           error: "Invalid phone number format",
           details: {
             provided: originalPhone,
-            expected_formats: ["+6392776547755", "6392776547755", "092776547755", "92776547755"],
-            message: "Please use a valid Philippine phone number (10 digits after country code)"
+            expected_formats: ["09916527333", "639916527333", "+639916527333", "9916527333"],
+            message: "Please use a valid Philippine phone number"
           }
         });
       }
       
-      // Rate limit check
+      // Validate SMS count range
       if (smsCount > 500) {
         return res.status(400).json({
           status: false,
@@ -173,7 +197,7 @@ module.exports = {
   }
 };
 
-// Helper functions
+// Helper functions (same as before)
 const generateRandomString = (length) => {
   const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   let result = "";
