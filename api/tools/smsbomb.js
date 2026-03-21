@@ -1,9 +1,6 @@
 const axios = require("axios");
 const randomUseragent = require("random-useragent");
 
-// Valid API keys
-const VALID_API_KEYS = ["selovasx123"];
-
 module.exports = {
   meta: {
     name: "SMS Bomber",
@@ -12,40 +9,11 @@ module.exports = {
     version: "1.0.0",
     category: "tools",
     method: "GET",
-    path: "/smsbomber?Number=&amount=&apiKey="
+    path: "/smsbomber?Number=&amount="
   },
   
   onStart: async function({ req, res }) {
     try {
-      // API Key Authentication
-      const apiKey = req.query.apiKey || req.query.api_key || req.query.apikey;
-      
-      // Check if API key is provided
-      if (!apiKey) {
-        return res.status(401).json({
-          status: false,
-          error: "API key is required",
-          usage: {
-            example: "/smsbomber?Number=09916527333&amount=1&apiKey=selovasx123",
-            required_params: {
-              Number: "Philippine phone number (supports +63, 63, 09, or 9 formats)",
-              amount: "Number of SMS to send (1-500)",
-              apiKey: "Valid API key for authentication (selovasx123)"
-            }
-          }
-        });
-      }
-      
-      // Validate API key
-      if (!VALID_API_KEYS.includes(apiKey)) {
-        return res.status(403).json({
-          status: false,
-          error: "Invalid API key",
-          message: "The provided API key is not valid. Please use a valid API key.",
-          valid_keys: VALID_API_KEYS
-        });
-      }
-      
       // Both parameters are required - support multiple parameter names
       let targetPhone = req.query.Number || req.query.phone || req.query.number;
       let smsCount = req.query.amount || req.query.times || req.query.count;
@@ -56,11 +24,10 @@ module.exports = {
           status: false,
           error: "Phone number is required",
           usage: {
-            example: "/smsbomber?Number=09916527333&amount=1&apiKey=selovasx123",
+            example: "/smsbomber?Number=09916527333&amount=1",
             required_params: {
               Number: "Philippine phone number (supports +63, 63, 09, or 9 formats)",
-              amount: "Number of SMS to send (1-500)",
-              apiKey: "Valid API key for authentication"
+              amount: "Number of SMS to send (1-500)"
             }
           }
         });
@@ -71,11 +38,10 @@ module.exports = {
           status: false,
           error: "Amount parameter is required",
           usage: {
-            example: "/smsbomber?Number=09916527333&amount=1&apiKey=selovasx123",
+            example: "/smsbomber?Number=09916527333&amount=1",
             required_params: {
               Number: "Philippine phone number",
-              amount: "Number of SMS to send (1-500)",
-              apiKey: "Valid API key for authentication"
+              amount: "Number of SMS to send (1-500)"
             }
           }
         });
@@ -146,7 +112,7 @@ module.exports = {
         });
       }
       
-      console.log(`🔑 API Key: ${apiKey} - Starting SMS bombing to ${formattedPhone} (${smsCount} times)...`);
+      console.log(`📨 Starting SMS bombing to ${formattedPhone} (${smsCount} times)...`);
       
       let successCount = 0;
       let failCount = 0;
@@ -195,8 +161,6 @@ module.exports = {
       
       res.json({
         status: true,
-        authenticated: true,
-        api_key_used: apiKey,
         message: "SMS bombing completed",
         target: {
           original: originalPhone,
@@ -226,14 +190,14 @@ module.exports = {
         status: false,
         error: "Failed to complete SMS bombing",
         details: error.message,
-        author: "Jaybohol",
+        author: "Kenneth Panio",
         timestamp: new Date().toISOString()
       });
     }
   }
 };
 
-// Helper functions
+// Helper functions (same as before)
 const generateRandomString = (length) => {
   const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   let result = "";
