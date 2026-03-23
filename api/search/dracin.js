@@ -6,7 +6,7 @@ module.exports = {
     name: "Dracin Text-to-Speech",
     description: "AI Voice with Drama China (Dracin) style - converts text to speech with Chinese drama narrator style",
     author: "Jaybohol",
-    version: "1.0.0",
+    version: "2.0.0",
     category: "ai",
     method: "GET",
     path: "/dracin/tts?text=&speed=&music=&volume="
@@ -41,8 +41,13 @@ module.exports = {
       let bgVol = parseFloat(volume);
       if (isNaN(bgVol) || bgVol < 0.1 || bgVol > 1.0) bgVol = 0.3;
       
+      console.log(`🎙️ Generating Dracin TTS: "${text.substring(0, 50)}..."`);
+      
       // Generate TTS audio
       const audioBuffer = await generateDracinTTS(text, parsedSpeed, useBg, bgVol);
+      
+      // Upload to temporary storage to get a URL
+      const audioUrl = await uploadToTmp(audioBuffer, `dracin-${Date.now()}.mp3`);
       
       // Stream directly if requested
       if (stream === "true") {
@@ -51,35 +56,18 @@ module.exports = {
         return res.send(audioBuffer);
       }
       
-      // Try to upload to temporary storage for URL
-      let audioUrl = null;
-      let uploadError = null;
-      
-      try {
-        audioUrl = await uploadToTmp(audioBuffer, `dracin-${Date.now()}.mp3`);
-      } catch (uploadErr) {
-        uploadError = uploadErr.message;
-      }
-      
       res.json({
         status: true,
         operator: "Jaybohol",
-        text: text,
-        text_length: text.length,
-        settings: {
-          speed: parsedSpeed,
-          background_music: useBg,
-          music_volume: bgVol
+        result: {
+          text: text,
+          audio: audioUrl,
+          settings: {
+            speed: parsedSpeed,
+            background_music: useBg,
+            music_volume: bgVol
+          }
         },
-        audio: audioUrl ? {
-          url: audioUrl,
-          size_bytes: audioBuffer.length
-        } : {
-          base64: audioBuffer.toString('base64'),
-          size_bytes: audioBuffer.length,
-          upload_error: uploadError
-        },
-        credits: "Jaybohol (via Dracin TTS)",
         timestamp: new Date().toISOString()
       });
       
@@ -89,13 +77,15 @@ module.exports = {
       res.status(500).json({
         status: false,
         operator: "Jaybohol",
-        error: error.message
+        error: error.message,
+        timestamp: new Date().toISOString()
       });
     }
   }
 };
 
-// Dracin TTS Generator
+// ============= DRACIN TTS GENERATOR =============
+
 async function generateDracinTTS(text, speed = 1.0, useBg = true, bgVol = 0.3) {
   const url = 'https://ricky01anjay-suaraind.hf.space/generate';
   
@@ -108,32 +98,69 @@ async function generateDracinTTS(text, speed = 1.0, useBg = true, bgVol = 0.3) {
         bg_vol: bgVol
       },
       responseType: 'arraybuffer',
-      timeout: 30000
+      timeout: 30000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
     });
     
-    return Buffer.from(response.data);
+    const audioBuffer = Buffer.from(response.data);
+    
+    // Check if the buffer contains valid MP3 data (not just LAME header)
+    if (audioBuffer.length < 1000 || audioBuffer.toString('utf8', 0, 10).includes('LAME')) {
+      throw new Error("Generated audio is invalid or corrupted");
+    }
+    
+    return audioBuffer;
   } catch (error) {
-    throw new Error(`Dracin TTS API Error: ${error.message}`);
+    console.error("Dracin TTS API Error:", error.message);
+    
+    if (error.response) {
+      throw new Error(`External API Error: ${error.response.status} - ${error.response.statusText}`);
+    }
+    throw new Error(`Dracin TTS External API Error: ${error.message}`);
   }
 }
 
-// Upload to temporary storage (example using tmp.ninja)
+// ============= UPLOAD TO TEMPORARY STORAGE =============
+
 async function uploadToTmp(buffer, filename) {
+  // Option 1: Upload to tmp.ninja
   try {
     const formData = new FormData();
     formData.append('file', buffer, { filename: filename });
     
     const response = await axios.post('https://tmp.ninja/api.php', formData, {
       headers: formData.getHeaders(),
-      timeout: 10000
+      timeout: 15000
     });
     
     if (response.data && response.data.url) {
       return response.data.url;
     }
-    throw new Error("Upload failed");
   } catch (error) {
-    console.error("Upload error:", error.message);
-    throw error;
+    console.log("tmp.ninja upload failed, trying alternative...");
   }
+  
+  // Option 2: Upload to catbox.moe
+  try {
+    const formData = new FormData();
+    formData.append('reqtype', 'fileupload');
+    formData.append('fileToUpload', buffer, { filename: filename });
+    
+    const response = await axios.post('https://catbox.moe/user/api.php', formData, {
+      headers: formData.getHeaders(),
+      timeout: 15000
+    });
+    
+    if (response.data && response.data.startsWith('http')) {
+      return response.data;
+    }
+  } catch (error) {
+    console.log("catbox.moe upload failed");
+  }
+  
+  // Option 3: Return base64 as fallback (with proper encoding)
+  const base64Data = buffer.toString('base64');
+  return `data:audio/mpeg;base64,${base64Data}`;
 }
