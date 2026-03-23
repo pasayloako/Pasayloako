@@ -1,4 +1,5 @@
-// file: api/media/[id].js
+// api/media/[id].js
+// This file handles requests like: /api/media/some-audio-id
 
 module.exports = {
   meta: {
@@ -13,12 +14,25 @@ module.exports = {
   
   onStart: async function({ req, res }) {
     try {
-      const { id } = req.params;
+      // Get the audio ID from URL parameter
+      // In Express, this would be req.params.id
+      // In your API structure, the ID might be in req.query or req.params
+      const id = req.params?.id || req.query?.id;
       
       console.log(`🔊 Audio request for ID: ${id}`);
       
+      // Check if cache exists
+      if (!global.audioCache) {
+        console.log("❌ No audio cache found");
+        return res.status(404).json({
+          success: false,
+          error: "No audio cache found. Please generate TTS first."
+        });
+      }
+      
       // Check if audio exists in cache
-      if (!global.audioCache || !global.audioCache.has(id)) {
+      if (!global.audioCache.has(id)) {
+        console.log(`❌ Audio not found. Available IDs: ${Array.from(global.audioCache.keys()).join(', ')}`);
         return res.status(404).json({
           success: false,
           error: "Audio not found or expired",
@@ -27,13 +41,14 @@ module.exports = {
       }
       
       const audioBuffer = global.audioCache.get(id);
+      console.log(`✅ Audio found! Size: ${audioBuffer.length} bytes`);
       
-      // Set correct headers for MP3 audio
+      // Set headers for MP3 audio
       res.setHeader('Content-Type', 'audio/mpeg');
       res.setHeader('Content-Length', audioBuffer.length);
       res.setHeader('Content-Disposition', 'inline; filename="tsundere-audio.mp3"');
-      res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
       
       // Send the audio buffer
       return res.send(audioBuffer);
