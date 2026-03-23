@@ -8,20 +8,19 @@ module.exports = {
     author: "Jaybohol",
     version: "1.0.0",
     category: "ai",
-    method: "GET",
-    path: "/tsundere/tts?text="
+    method: "POST",
+    path: "/api/ai/tsundere"
   },
   
   onStart: async function({ req, res }) {
     try {
-      const { text, voice = "Kore", language = "id-ID", speed = 1.1, pitch = 2.5 } = req.query;
+      const { text, voice = "Kore", language = "id-ID", speed = 1.1, pitch = 2.5 } = req.body;
       
       if (!text) {
         return res.status(400).json({
           success: false,
           author: "Jaybohol",
-          message: "Parameter 'text' wajib diisi.",
-          usage: "/tsundere/tts?text=Bukannya%20aku%20menyukaimu%20ya,%20dasar%20baka!"
+          message: "Parameter 'text' wajib diisi."
         });
       }
       
@@ -49,12 +48,10 @@ module.exports = {
       // Generate TTS audio
       const audioBuffer = await generateTsundereTTS(text, selectedVoice, selectedLanguage, parsedSpeed, parsedPitch);
       
-      // Generate unique ID for the audio (like PuruBoy API)
+      // Generate unique ID for the audio
       const audioId = generateAudioId(text);
-      const audioUrl = `https://your-api-domain.com/api/media/${audioId}`;
       
-      // Store audio temporarily (in memory or cache)
-      // For production, you'd want to store this in a database or file system
+      // Store audio temporarily
       if (!global.audioCache) global.audioCache = new Map();
       global.audioCache.set(audioId, audioBuffer);
       
@@ -62,6 +59,10 @@ module.exports = {
       setTimeout(() => {
         global.audioCache.delete(audioId);
       }, 5 * 60 * 1000);
+      
+      // Get the domain from the request
+      const domain = `${req.protocol}://${req.get('host')}`;
+      const audioUrl = `${domain}/api/media/${audioId}`;
       
       res.json({
         success: true,
@@ -86,7 +87,7 @@ module.exports = {
 
 // ============= MEDIA ENDPOINT (for serving audio) =============
 
-// Add this as a separate endpoint in your API
+// Add this as a separate API endpoint for serving audio files
 module.exports.media = {
   meta: {
     name: "Tsundere Media",
@@ -105,7 +106,7 @@ module.exports.media = {
       if (!global.audioCache || !global.audioCache.has(id)) {
         return res.status(404).json({
           success: false,
-          error: "Audio not found or expired"
+          message: "Audio not found or expired"
         });
       }
       
@@ -118,7 +119,7 @@ module.exports.media = {
     } catch (error) {
       res.status(500).json({
         success: false,
-        error: error.message
+        message: error.message
       });
     }
   }
@@ -131,7 +132,6 @@ function generateFakeIP() {
 }
 
 function generateAudioId(text) {
-  // Create a unique ID based on text + timestamp
   const timestamp = Date.now();
   const random = crypto.randomBytes(16).toString('hex');
   const hash = crypto.createHash('sha256').update(`${text}${timestamp}`).digest('hex');
