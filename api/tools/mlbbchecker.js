@@ -8,7 +8,7 @@ module.exports = {
     description: "Check Mobile Legends Bang Bang account region and info via PizzoShop",
     author: "Jaybohol",
     version: "1.0.0",
-    category: "gaming",
+    category: "tools",
     method: "GET",
     path: "/mlbb/check?user_id=&zone_id="
   },
@@ -73,8 +73,7 @@ module.exports = {
           last_login: result.lastLogin || "Unknown",
           created_at: result.createdAt || "Unknown"
         },
-        timestamp: new Date().toISOString(),
-        source: "PizzoShop MLBB Checker"
+        timestamp: new Date().toISOString()
       });
       
     } catch (error) {
