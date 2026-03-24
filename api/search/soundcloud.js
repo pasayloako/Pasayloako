@@ -1,15 +1,14 @@
 // api/soundcloud.js
 
 const axios = require("axios");
-const cheerio = require("cheerio");
 
 module.exports = {
   meta: {
     name: "SoundCloud Search",
     description: "Search and get direct MP3 download links from SoundCloud",
     author: "Jaybohol",
-    version: "2.0.0",
-    category: "music",
+    version: "3.0.0",
+    category: "search",
     method: "GET",
     path: "/soundcloud?q="
   },
@@ -66,179 +65,103 @@ module.exports = {
   }
 };
 
-// ============= WORKING SOUNDCLOUD SEARCH =============
+// ============= WORKING SOUNDCLOUD SEARCH USING EXTERNAL API =============
 
 async function searchSoundCloudTracks(query) {
   try {
-    // Method 1: Using working SoundCloud API endpoint
-    const workingClientId = "a3e059563d7fd3372b49b37f00a00bcf";
-    
-    const response = await axios.get(`https://api-v2.soundcloud.com/search`, {
-      params: {
-        q: query,
-        variant_ids: "",
-        facet: "model",
-        user_id: "",
-        limit: 20,
-        offset: 0,
-        linked_partitioning: 1,
-        client_id: workingClientId,
-        app_version: "1741766539",
-        app_locale: "en"
-      },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Origin': 'https://soundcloud.com',
-        'Referer': 'https://soundcloud.com/'
-      },
-      timeout: 15000
-    });
-    
-    if (response.data && response.data.collection) {
-      const tracks = response.data.collection.filter(item => item.kind === "track");
-      
-      const results = [];
-      for (const track of tracks) {
-        const audioUrl = await getStreamUrl(track.id, workingClientId);
-        
-        results.push({
-          title: track.title,
-          artist: track.user?.username || "Unknown",
-          duration: formatDuration(track.duration),
-          url: track.permalink_url,
-          thumbnail: track.artwork_url || track.user?.avatar_url,
-          audio: audioUrl
-        });
-      }
-      
-      if (results.length > 0) {
-        return results;
-      }
-    }
-    
-    // Method 2: Alternative search endpoint
-    const altResponse = await axios.get(`https://api.soundcloud.com/tracks`, {
-      params: {
-        q: query,
-        limit: 20,
-        client_id: workingClientId,
-        linked_partitioning: 1
-      },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      },
-      timeout: 15000
-    });
-    
-    if (altResponse.data && altResponse.data.collection) {
-      const results = [];
-      for (const track of altResponse.data.collection) {
-        const audioUrl = track.stream_url ? `${track.stream_url}?client_id=${workingClientId}` : null;
-        
-        results.push({
-          title: track.title,
-          artist: track.user?.username || "Unknown",
-          duration: formatDuration(track.duration),
-          url: track.permalink_url,
-          thumbnail: track.artwork_url || track.user?.avatar_url,
-          audio: audioUrl
-        });
-      }
-      
-      if (results.length > 0) {
-        return results;
-      }
-    }
-    
-    // Method 3: Fallback to web scraping
-    return await searchSoundCloudWeb(query);
-    
-  } catch (error) {
-    console.error("Search Error:", error.message);
-    return await searchSoundCloudWeb(query);
-  }
-}
-
-// ============= WEB SCRAPING FALLBACK =============
-
-async function searchSoundCloudWeb(query) {
-  try {
+    // Method 1: Using public SoundCloud search API (working)
     const response = await axios.get(`https://soundcloud.com/search/sounds`, {
       params: { q: query },
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5'
       },
       timeout: 15000
     });
     
-    const $ = cheerio.load(response.data);
-    const results = [];
+    // Extract track data from HTML
+    const html = response.data;
     
-    // Find script tags containing track data
-    const scripts = $('script').toArray();
-    let tracksData = null;
+    // Find the JSON data embedded in the page
+    const jsonMatch = html.match(/window\.__sc_hydration\s*=\s*(\[.*?\]);/s);
     
-    for (const script of scripts) {
-      const content = $(script).html();
-      if (content && content.includes('window.__sc_hydration')) {
-        try {
-          const match = content.match(/window\.__sc_hydration\s*=\s*(\[.*?\]);/s);
-          if (match) {
-            const data = JSON.parse(match[1]);
-            for (const item of data) {
-              if (item.hydratable === "searchPage" && item.data && item.data.collection) {
-                tracksData = item.data.collection;
-                break;
-              }
+    if (jsonMatch) {
+      try {
+        const data = JSON.parse(jsonMatch[1]);
+        
+        for (const item of data) {
+          if (item.hydratable === "searchPage" && item.data && item.data.collection) {
+            const tracks = item.data.collection.filter(t => t.kind === "track");
+            
+            const results = [];
+            for (const track of tracks.slice(0, 15)) {
+              results.push({
+                title: track.title,
+                artist: track.user?.username || "Unknown",
+                duration: formatDuration(track.duration),
+                url: track.permalink_url,
+                thumbnail: track.artwork_url || track.user?.avatar_url,
+                audio: null
+              });
+            }
+            
+            if (results.length > 0) {
+              return results;
             }
           }
-        } catch (e) {}
-      }
-    }
-    
-    if (tracksData) {
-      for (const track of tracksData) {
-        if (track.kind === "track") {
-          results.push({
-            title: track.title,
-            artist: track.user?.username || "Unknown",
-            duration: formatDuration(track.duration),
-            url: track.permalink_url,
-            thumbnail: track.artwork_url || track.user?.avatar_url,
-            audio: null
-          });
         }
+      } catch (e) {
+        console.error("JSON Parse Error:", e.message);
       }
     }
     
-    return results.slice(0, 20);
+    // Method 2: Use alternative search API
+    return await searchSoundCloudAlternative(query);
     
   } catch (error) {
-    console.error("Web Search Error:", error.message);
-    return [];
+    console.error("Search Error:", error.message);
+    return await searchSoundCloudAlternative(query);
   }
 }
 
-// ============= GET STREAM URL =============
+// ============= ALTERNATIVE SEARCH USING THIRD-PARTY API =============
 
-async function getStreamUrl(trackId, clientId) {
+async function searchSoundCloudAlternative(query) {
   try {
-    const response = await axios.get(`https://api.soundcloud.com/tracks/${trackId}/streams`, {
-      params: { client_id: clientId },
+    // Using a public SoundCloud API proxy
+    const response = await axios.get(`https://api.soundcloud.com/tracks`, {
+      params: {
+        q: query,
+        limit: 15,
+        client_id: 'a3e059563d7fd3372b49b37f00a00bcf'
+      },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
       timeout: 10000
     });
     
-    if (response.data && response.data.http_mp3_128_url) {
-      return response.data.http_mp3_128_url;
+    if (response.data && response.data.collection) {
+      const results = [];
+      for (const track of response.data.collection) {
+        results.push({
+          title: track.title,
+          artist: track.user?.username || "Unknown",
+          duration: formatDuration(track.duration),
+          url: track.permalink_url,
+          thumbnail: track.artwork_url || track.user?.avatar_url,
+          audio: null
+        });
+      }
+      return results;
     }
     
-    return null;
+    return [];
+    
   } catch (error) {
-    return null;
+    console.error("Alternative Search Error:", error.message);
+    return [];
   }
 }
 
@@ -246,69 +169,49 @@ async function getStreamUrl(trackId, clientId) {
 
 async function downloadSoundCloudTrack(url) {
   try {
-    // Extract track ID from URL
-    const trackId = await extractTrackId(url);
+    // Using soundcloud-downloader API
+    const downloadApi = `https://soundcloud-downloader.vercel.app/api?url=${encodeURIComponent(url)}`;
     
-    if (!trackId) {
-      throw new Error("Could not extract track ID");
-    }
-    
-    const clientId = "a3e059563d7fd3372b49b37f00a00bcf";
-    
-    // Get track info
-    const trackInfo = await axios.get(`https://api.soundcloud.com/tracks/${trackId}`, {
-      params: { client_id: clientId },
-      timeout: 10000
+    const response = await axios.get(downloadApi, {
+      timeout: 20000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
     });
     
-    const track = trackInfo.data;
-    
-    // Get stream URL
-    let audioUrl = null;
-    
-    if (track.stream_url) {
-      audioUrl = `${track.stream_url}?client_id=${clientId}`;
+    if (response.data && response.data.url) {
+      return {
+        title: response.data.title || "SoundCloud Track",
+        duration: response.data.duration || "N/A",
+        audio_url: response.data.url
+      };
     }
     
-    if (track.download_url) {
-      audioUrl = `${track.download_url}?client_id=${clientId}`;
-    }
-    
-    // Try alternative method
-    if (!audioUrl) {
-      const streamResponse = await axios.get(`https://api.soundcloud.com/tracks/${trackId}/streams`, {
-        params: { client_id: clientId },
-        timeout: 10000
-      });
-      
-      if (streamResponse.data && streamResponse.data.http_mp3_128_url) {
-        audioUrl = streamResponse.data.http_mp3_128_url;
-      }
-    }
-    
-    return {
-      title: track.title,
-      duration: formatDuration(track.duration),
-      audio_url: audioUrl
-    };
+    throw new Error("No download URL found");
     
   } catch (error) {
     console.error("Download Error:", error.message);
+    
+    // Fallback: Try to extract track ID and get stream
+    const trackId = await extractTrackId(url);
+    
+    if (trackId) {
+      const clientId = 'a3e059563d7fd3372b49b37f00a00bcf';
+      const streamUrl = `https://api.soundcloud.com/tracks/${trackId}/stream?client_id=${clientId}`;
+      
+      return {
+        title: "SoundCloud Track",
+        duration: "N/A",
+        audio_url: streamUrl
+      };
+    }
+    
     throw new Error("Unable to download track");
   }
 }
 
 async function extractTrackId(url) {
   try {
-    // Method 1: Direct ID in URL
-    const idMatch = url.match(/soundcloud\.com\/tracks\/(\d+)/);
-    if (idMatch) return idMatch[1];
-    
-    // Method 2: URL pattern with hyphen
-    const hyphenMatch = url.match(/soundcloud\.com\/(?:[^\/]+)\/(?:[^\/]+)-(\d+)$/);
-    if (hyphenMatch) return hyphenMatch[1];
-    
-    // Method 3: Fetch page and extract
     const response = await axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -316,18 +219,19 @@ async function extractTrackId(url) {
       timeout: 10000
     });
     
-    const $ = cheerio.load(response.data);
-    const metaId = $('meta[property="soundcloud:track:id"]').attr('content');
-    if (metaId) return metaId;
+    const html = response.data;
     
-    const scripts = $('script').toArray();
-    for (const script of scripts) {
-      const content = $(script).html();
-      if (content) {
-        const match = content.match(/track_id["']?\s*:\s*["']?(\d+)["']?/);
-        if (match) return match[1];
-      }
-    }
+    // Find track ID in meta tags
+    const metaMatch = html.match(/<meta[^>]*property="soundcloud:track:id"[^>]*content="(\d+)"/);
+    if (metaMatch) return metaMatch[1];
+    
+    // Find in JSON data
+    const jsonMatch = html.match(/track_id["']?\s*:\s*["']?(\d+)["']?/);
+    if (jsonMatch) return jsonMatch[1];
+    
+    // Find in script
+    const scriptMatch = html.match(/trackId:\s*['"]?(\d+)['"]?/);
+    if (scriptMatch) return scriptMatch[1];
     
     return null;
     
