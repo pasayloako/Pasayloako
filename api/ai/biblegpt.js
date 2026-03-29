@@ -1,13 +1,27 @@
-// api/biblegpt.js
+// api/biblegpt.js - With Memory
 
 const axios = require("axios");
+
+// Simple in-memory storage for conversations
+// In production, use a database like Redis, MongoDB, etc.
+const conversations = new Map();
+
+// Clean up old conversations after 1 hour
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, data] of conversations.entries()) {
+    if (now - data.timestamp > 3600000) { // 1 hour
+      conversations.delete(id);
+    }
+  }
+}, 300000); // Check every 5 minutes
 
 module.exports = {
   meta: {
     name: "BibleGPT",
-    description: "AI-powered tool that delivers accurate Bible-based answers to user queries",
+    description: "AI-powered tool that delivers accurate Bible-based answers with conversation memory",
     author: "Jaybohol",
-    version: "1.0.0",
+    version: "2.0.0",
     category: "ai",
     method: "GET",
     path: "/biblegpt?q="
@@ -15,25 +29,64 @@ module.exports = {
   
   onStart: async function({ req, res }) {
     try {
-      const { q } = req.query;
+      const { q, session_id } = req.query;
       
       if (!q) {
         return res.status(400).json({
           success: false,
           author: "Jaybohol",
           message: "Please provide a question",
-          usage: "/biblegpt?q=im sad"
+          usage: "/biblegpt?q=I'm lonely&session_id=user123"
         });
       }
       
-      // Get Bible-based response
-      const answer = await getBibleResponse(q);
+      // Get or create session
+      let sessionId = session_id;
+      if (!sessionId) {
+        // Generate a simple session ID if not provided
+        sessionId = `user_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      }
+      
+      // Get conversation history
+      let conversation = conversations.get(sessionId);
+      if (!conversation) {
+        conversation = {
+          messages: [],
+          timestamp: Date.now()
+        };
+      }
+      
+      // Update timestamp
+      conversation.timestamp = Date.now();
+      
+      // Get Bible-based response with context
+      const result = await getBibleResponseWithMemory(q, conversation.messages);
+      
+      // Store this exchange in memory
+      conversation.messages.push({
+        role: "user",
+        content: q,
+        timestamp: Date.now()
+      });
+      conversation.messages.push({
+        role: "assistant",
+        content: result.answer,
+        timestamp: Date.now()
+      });
+      
+      // Keep only last 10 messages to prevent memory overflow
+      if (conversation.messages.length > 20) {
+        conversation.messages = conversation.messages.slice(-20);
+      }
+      
+      conversations.set(sessionId, conversation);
       
       res.json({
         success: true,
         author: "Jaybohol",
+        session_id: sessionId,
         result: {
-          answer: answer
+          answer: result.answer
         }
       });
       
@@ -49,12 +102,26 @@ module.exports = {
   }
 };
 
-// ============= BIBLE RESPONSE GENERATOR =============
+// ============= BIBLE RESPONSE WITH MEMORY =============
 
-async function getBibleResponse(question) {
+async function getBibleResponseWithMemory(question, history) {
   try {
-    // System prompt for BibleGPT
+    // Build conversation context
+    let context = "";
+    if (history && history.length > 0) {
+      const lastFew = history.slice(-6); // Last 3 exchanges
+      context = "Previous conversation:\n";
+      for (const msg of lastFew) {
+        context += `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}\n`;
+      }
+      context += "\nCurrent question: " + question + "\n\n";
+    }
+    
+    const fullPrompt = context + question;
+    
+    // System prompt for BibleGPT with context awareness
     const systemPrompt = `You are BibleGPT, an AI-powered tool that delivers accurate Bible-based answers. 
+You remember the previous conversation. Be consistent and refer back to previous topics when relevant.
 Your responses must:
 - Be based on the Bible
 - Include relevant Bible verses with references
@@ -62,8 +129,8 @@ Your responses must:
 - Answer directly without extra formatting like ** or markdown
 - Keep responses concise but meaningful`;
     
-    // Call Pollinations AI
-    const response = await axios.get(`https://text.pollinations.ai/${encodeURIComponent(question)}`, {
+    // Call Pollinations AI with context
+    const response = await axios.get(`https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}`, {
       params: {
         model: "openai",
         temperature: 0.7,
@@ -74,28 +141,47 @@ Your responses must:
     
     let answer = response.data;
     
-    // Clean up any markdown formatting
+    // Clean up formatting
     answer = answer.replace(/\*\*/g, '');
     answer = answer.replace(/\*/g, '');
     answer = answer.replace(/\n\n/g, ' ');
     answer = answer.replace(/\n/g, ' ');
     answer = answer.replace(/\s+/g, ' ').trim();
     
-    return answer;
+    return { answer };
     
   } catch (error) {
     console.error("Polo AI Error:", error.message);
     
-    // Fallback responses
-    return getFallbackResponse(question);
+    // Fallback response with memory
+    return { answer: getFallbackResponseWithMemory(question, history) };
   }
 }
 
-function getFallbackResponse(question) {
+function getFallbackResponseWithMemory(question, history) {
   const lowerQuestion = question.toLowerCase();
   
-  // Malungkot ako / I'm lonely / sad
-  if (lowerQuestion.includes("malungkot") || lowerQuestion.includes("lonely") || lowerQuestion.includes("sad") || lowerQuestion.includes("alone")) {
+  // Check if this is a follow-up question
+  const lastQuestion = history.length > 0 ? history[history.length - 2]?.content?.toLowerCase() : "";
+  
+  // If asking "about it" and previous topic was love
+  if ((lowerQuestion.includes("about it") || lowerQuestion.includes("tell me more")) && lastQuestion.includes("love")) {
+    return "Tulad ng nabanggit kanina, ang pag-ibig ay inilarawan sa 1 Corinto 13. Dagdag pa rito, sa 1 Juan 4:19 sinasabi, \"Tayo ay umiibig sapagkat tayo ay minahal muna ng Diyos.\" Ang pag-ibig ay hindi lamang ating ginagawa—ito ay tugon sa pag-ibig na una nang ipinakita ng Diyos sa atin. Kapag nauunawaan natin kung gaano tayo kamahal ng Diyos, mas madali nating maipapakita ang pag-ibig sa iba. May iba ka pa bang gustong malaman tungkol sa pag-ibig?";
+  }
+  
+  // If asking for more verses after a topic
+  if (lowerQuestion.includes("another verse") || lowerQuestion.includes("more verse")) {
+    return "Narito ang isa pang talata na makatutulong sa iyo: \"Ang pag-ibig ay matiyaga at magandang-loob. Hindi ito nauinggit, hindi nagyayabang, hindi mapagmataas\" (1 Corinto 13:4). Ang Salita ng Diyos ay puno ng karunungan. Kung may partikular kang paksa na nais pag-aralan, maaari mo akong tanungin nang direkta.";
+  }
+  
+  // Malungkot ako / I'm lonely / sad (with follow-up awareness)
+  if ((lowerQuestion.includes("malungkot") || lowerQuestion.includes("lonely") || lowerQuestion.includes("sad")) && 
+      history.some(m => m.content.toLowerCase().includes("malungkot") || m.content.toLowerCase().includes("lonely"))) {
+    return "Nabanggit mo kanina na nalulungkot ka. Gusto kong ipaalala sa iyo ang Salmo 34:18: \"Malapit ang Panginoon sa mga may bagbag na puso, at inililigtas ang mga may pusong sawi.\" Hindi ka nag-iisa sa iyong pinagdadaanan. Ang Diyos ay mas malapit kaysa sa iyong iniisip. Gusto mo bang manalangin tayo, o gusto mo pang magbahagi ng iyong nararamdaman? Nandito ako para makinig.";
+  }
+  
+  // First time asking about loneliness
+  if (lowerQuestion.includes("malungkot") || lowerQuestion.includes("lonely") || lowerQuestion.includes("sad")) {
     return "Kaibigan, naiintindihan ko na malungkot ka ngayon, at gusto kong malaman mo na hindi ka nag-iisa sa damdaming iyon. Sa Biblia, sinasabi sa Salmo 147:3, \"Pinagagaling ng Panginoon ang mga nanghihina ang puso, at dinudugtungan ang kanilang mga sugatang damdamin.\" Ang Diyos ay nandiyan para paginhawahin ka at gabayan ka sa mga sandaling malungkot ka. Gusto mo ba na pag-usapan natin nang mas malalim ang dahilan ng iyong kalungkutan, o gusto mo bang marinig pa ang iba pang mga talata na makapagbibigay ng lakas at pag-asa sa iyong puso?";
   }
   
@@ -114,26 +200,10 @@ function getFallbackResponse(question) {
     return "Ang Biblia ay maraming sinasabi tungkol sa pag-ibig. Sa 1 Corinto 13:4-7, inilalarawan nito ang pag-ibig: \"Ang pag-ibig ay matiyaga at magandang-loob. Hindi ito nauinggit, hindi nagyayabang, hindi mapagmataas. Hindi ito bastos, hindi makasarili, hindi madaling magalit, at hindi nagtatanim ng sama ng loob. Hindi natutuwa ang pag-ibig sa masama kundi sa katotohanan. Ang pag-ibig ay laging nagtatanggol, laging nagtitiwala, laging umaasa, laging nagtitiyaga.\" At sa 1 Juan 4:8, sinasabi na \"Ang Diyos ay pag-ibig.\" Ang pag-ibig ay hindi lamang damdamin—ito ay pagkilos, pagpili, at higit sa lahat, ito ang katangian ng Diyos mismo.";
   }
   
-  // Faith
-  if (lowerQuestion.includes("faith") || lowerQuestion.includes("pananampalataya")) {
-    return "Ang pananampalataya ay sentro sa buhay Kristiyano. Ang Hebreo 11:1 ay nagsasabing: \"Ang pananampalataya ay ang pagkakatiwala sa mga bagay na ating inaasahan, at ang katibayan ng mga bagay na hindi natin nakikita.\" Ito ay pagtitiwala sa Diyos kahit hindi natin nakikita ang resulta. Ang Efeso 2:8-9 ay nagpapaalala na tayo ay naligtas sa pamamagitan ng biyaya sa pananampalataya—ito ay kaloob ng Diyos, hindi bunga ng ating mga gawa. Lumalago ang pananampalataya sa pamamagitan ng pakikinig sa Salita ng Diyos (Roma 10:17) at sa pamamagitan ng mga pagsubok na nagpapalakas ng ating pagtitiwala sa Kanya.";
+  // Default response with memory awareness
+  if (history.length > 0) {
+    return "Salamat sa iyong katanungan. Batay sa ating nakaraang usapan, gusto mo bang pag-usapan pa natin ang tungkol sa paksang iyon? O may bago kang nais itanong tungkol sa Biblia? Ang Salita ng Diyos ay puno ng karunungan, at handa akong tumulong sa iyong pag-aaral.";
   }
   
-  // Prayer
-  if (lowerQuestion.includes("pray") || lowerQuestion.includes("dasal")) {
-    return "Ang panalangin ay simpleng pakikipag-usap sa Diyos. Itinuro ni Jesus ang panalangin sa Mateo 6:9-13: \"Ama namin na nasa langit, sambahin ang pangalan mo. Dumating ang kaharian mo, sundin ang kalooban mo dito sa lupa gaya ng sa langit. Bigyan mo kami ng aming kakanin sa araw-araw. At patawarin mo kami sa aming mga kasalanan, gaya ng pagpapatawad namin sa mga nagkakasala sa amin. At huwag mo kaming hayaang matukso, kundi iligtas mo kami sa masama.\" Hinihikayat tayo ng Biblia na \"manalangin nang walang tigil\" (1 Tesalonica 5:17) at dalhin ang lahat sa Diyos sa panalangin na may pasasalamat (Filipos 4:6). Walang maling paraan sa pagdarasal—lumapit lang sa Diyos nang may tapat na puso.";
-  }
-  
-  // Hope
-  if (lowerQuestion.includes("hope") || lowerQuestion.includes("pag-asa")) {
-    return "Ang pag-asa sa Biblia ay hindi basta paghiling lamang—ito ay tiwala sa mga pangako ng Diyos. Sinasabi sa Jeremias 29:11: \"Sapagkat ako lamang ang nakakaalam ng aking mga plano para sa inyo, mga planong hindi kayo pinsalain kundi palaguin, mga planong magbibigay sa inyo ng kinabukasan at pag-asa.\" Ang Roma 15:13 ay nagbibigay ng magandang basbas: \"Sumainyo nawa ang Diyos ng pag-asa at punuin niya kayo ng kagalakan at kapayapaan habang kayo'y sumasampalataya sa kanya, upang ang inyong pag-asa ay sumagana sa pamamagitan ng kapangyarihan ng Espiritu Santo.\" Kahit gaano man kahirap ang sitwasyon, ang pag-asa ay nagpapaalala na ang Diyos ay may magandang plano para sa atin.";
-  }
-  
-  // Peace
-  if (lowerQuestion.includes("peace") || lowerQuestion.includes("kapayapaan")) {
-    return "Nag-aalok ang Diyos ng kapayapaan na higit sa ating pang-unawa. Sinabi ni Jesus sa Juan 14:27: \"Kapayapaan ang iniiwan ko sa inyo; ang aking kapayapaan ay ibinibigay ko sa inyo. Hindi ko ito ibinibigay tulad ng pagbibigay ng mundo. Huwag mabagabag ang inyong mga puso at huwag matakot.\" At sa Filipos 4:6-7: \"Huwag kayong mabalisa sa anumang bagay; sa halip, sa lahat ng bagay, sa pamamagitan ng panalangin at pagsusumamo na may pasasalamat, ipaalam ninyo sa Diyos ang inyong mga kahilingan. At ang kapayapaan ng Diyos, na higit sa lahat ng pang-unawa, ang siyang magbabantay sa inyong mga puso at pag-iisip kay Cristo Jesus.\" Ang kapayapaang ito ay hindi nakadepende sa sitwasyon—ito ay nagmumula sa pagtitiwala na ang Diyos ay may kontrol at nagmamalasakit sa atin.";
-  }
-  
-  // Default response
-  return "Salamat sa iyong tanong. Ang Biblia ay may karunungan para sa bawat aspeto ng buhay. Upang mabigyan kita ng pinaka-angkop na sagot, maaari kang magtanong tungkol sa isang partikular na talata (gaya ng 'Juan 3:16'), isang tema sa Biblia (gaya ng 'pag-ibig' o 'pananampalataya'), o isang kuwento sa Biblia (gaya ng 'David at Goliath'). Gaya ng sinasabi sa 2 Timoteo 3:16-17, 'Ang buong Kasulatan ay hiningahan ng Diyos at mapapakinabangan sa pagtuturo, sa pagsaway, sa pagtutuwid, at sa pagsasanay sa katuwiran, upang ang lingkod ng Diyos ay maging ganap na handa sa bawat mabuting gawain.' Ano ang nais mong malaman tungkol sa Salita ng Diyos?";
+  return "Salamat sa iyong tanong. Ang Biblia ay may karunungan para sa bawat aspeto ng buhay. Upang mabigyan kita ng pinaka-angkop na sagot, maaari kang magtanong tungkol sa isang partikular na talata (gaya ng 'Juan 3:16'), isang tema sa Biblia (gaya ng 'pag-ibig' o 'pananampalataya'), o isang kuwento sa Biblia (gaya ng 'David at Goliath'). Ano ang nais mong malaman tungkol sa Salita ng Diyos?";
 }
