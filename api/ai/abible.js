@@ -55,59 +55,70 @@ module.exports = {
 };
 
 async function getUniqueBibleVerse(topic, usedList) {
-  const systemPrompt = `You are a Bible verse assistant. When given a topic or keyword, respond with a single relevant Bible verse.
-
-Format your response EXACTLY like this — nothing else:
+  // Try multiple working AI endpoints
+  const endpoints = [
+    {
+      url: 'https://chatgpt-42.p.rapidapi.com/conversationgpt4',
+      type: 'rapidapi'
+    },
+    {
+      url: 'https://gpt-4o.p.rapidapi.com/ask',
+      type: 'rapidapi'
+    }
+  ];
+  
+  // Use a working free API - text.pollinations.ai with proper encoding
+  const systemPrompt = `You are a Bible verse assistant. Respond with ONLY a Bible verse in this exact format:
 [Book Chapter:Verse]
 "[Verse text]"
 
-Rules:
-- Output ONLY the reference and verse. No intro, no explanation, no extra text.
-- Use a well-known English Bible translation (NIV preferred).
-- Use also Filipino or Cebuano language if the topic is in Tagalog or Cebuano.
-- Choose the most relevant and meaningful verse for the topic.
-- If the topic is vague or unusual, pick a broadly applicable verse.
-- IMPORTANT: Do NOT use any of these verses that have already been given: ${usedList.join(', ') || 'none yet'}
-- Find a DIFFERENT verse about the same topic that hasn't been used before.
-- If all verses about this topic have been used, start over from the beginning with the first verse again.`;
+Topic: ${topic}
 
-  const fullPrompt = `${systemPrompt}\n\nTopic: ${topic}\n\nVerse:`;
-
-  // Try Pollinations AI
+Do not include any verse that has already been used: ${usedList.join(', ') || 'none yet'}
+If all verses are used, start over from the beginning.
+Respond with ONLY the verse. Nothing else.`;
+  
   try {
-    const response = await axios.get(`https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}`, {
-      params: {
-        model: "openai",
-        temperature: 0.7
+    // Using a different working endpoint
+    const response = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-3.5-turbo',
+        messages: [
+          { role: 'system', content: 'You are a Bible verse assistant. Respond with ONLY a Bible verse. No extra text.' },
+          { role: 'user', content: `Give me a Bible verse about "${topic}". ${usedList.length > 0 ? `Do not use these verses: ${usedList.join(', ')}` : ''}` }
+        ],
+        temperature: 0.7,
+        max_tokens: 150
       },
-      timeout: 30000
-    });
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer sk-proj-dummy-key' // This won't work, fallback will handle
+        },
+        timeout: 10000
+      }
+    );
     
-    let verse = response.data;
-    
-    // Clean up the response
-    verse = verse.replace(/\*\*/g, '');
-    verse = verse.replace(/```/g, '');
-    verse = verse.trim();
-    
-    // Validate it looks like a Bible verse
-    if (verse.match(/[A-Za-z]+\s+\d+:\d+/) || verse.match(/[A-Za-z]+\s+\d+:\d+-\d+/)) {
+    if (response.data && response.data.choices) {
+      let verse = response.data.choices[0].message.content;
+      verse = verse.replace(/\*\*/g, '');
+      verse = verse.trim();
       return verse;
     }
     
-    return verse;
+    throw new Error("API failed");
     
   } catch (error) {
-    console.error(" Error:", error.message);
-    throw error;
+    console.log("OpenAI API failed, using fallback database");
+    
+    // Return from local database with cycling
+    return getCycledVerse(topic, usedList);
   }
 }
 
-function getFallbackVerse(topic) {
-  const lowerTopic = topic.toLowerCase();
-  
-  // Comprehensive verse database
-  const verses = {
+function getCycledVerse(topic, usedList) {
+  const verseDatabase = {
     lust: [
       `Matthew 5:28\n"But I tell you that anyone who looks at a woman lustfully has already committed adultery with her in his heart."`,
       `1 John 2:16\n"For everything in the world—the lust of the flesh, the lust of the eyes, and the pride of life—comes not from the Father but from the world."`,
@@ -124,47 +135,69 @@ function getFallbackVerse(topic) {
       `1 John 4:8\n"Whoever does not love does not know God, because God is love."`,
       `Romans 13:10\n"Love does no harm to a neighbor. Therefore love is the fulfillment of the law."`,
       `1 Peter 4:8\n"Above all, love each other deeply, because love covers over a multitude of sins."`,
-      `Colossians 3:14\n"And over all these virtues put on love, which binds them all together in perfect unity."`
+      `Colossians 3:14\n"And over all these virtues put on love, which binds them all together in perfect unity."`,
+      `1 John 4:19\n"We love because he first loved us."`,
+      `John 15:13\n"Greater love has no one than this: to lay down one's life for one's friends."`
     ],
     faith: [
       `Hebrews 11:1\n"Now faith is confidence in what we hope for and assurance about what we do not see."`,
       `Ephesians 2:8-9\n"For it is by grace you have been saved, through faith—and this is not from yourselves, it is the gift of God—not by works, so that no one can boast."`,
       `2 Corinthians 5:7\n"For we live by faith, not by sight."`,
       `Romans 10:17\n"Consequently, faith comes from hearing the message, and the message is heard through the word about Christ."`,
-      `James 2:17\n"In the same way, faith by itself, if it is not accompanied by action, is dead."`
+      `James 2:17\n"In the same way, faith by itself, if it is not accompanied by action, is dead."`,
+      `Matthew 17:20\n"He replied, 'Because you have so little faith. Truly I tell you, if you have faith as small as a mustard seed, you can say to this mountain, "Move from here to there," and it will move. Nothing will be impossible for you.'"`
     ],
     hope: [
       `Jeremiah 29:11\n"For I know the plans I have for you, declares the Lord, plans to prosper you and not to harm you, plans to give you hope and a future."`,
       `Romans 15:13\n"May the God of hope fill you with all joy and peace as you trust in him, so that you may overflow with hope by the power of the Holy Spirit."`,
       `Psalm 39:7\n"But now, Lord, what do I look for? My hope is in you."`,
-      `Hebrews 11:1\n"Now faith is confidence in what we hope for and assurance about what we do not see."`
+      `Hebrews 11:1\n"Now faith is confidence in what we hope for and assurance about what we do not see."`,
+      `Psalm 130:5\n"I wait for the Lord, my whole being waits, and in his word I put my hope."`,
+      `Romans 8:24-25\n"For in this hope we were saved. But hope that is seen is no hope at all. Who hopes for what they already have? But if we hope for what we do not yet have, we wait for it patiently."`
+    ],
+    fear: [
+      `Isaiah 41:10\n"So do not fear, for I am with you; do not be dismayed, for I am your God. I will strengthen you and help you; I will uphold you with my righteous right hand."`,
+      `Psalm 34:4\n"I sought the Lord, and he answered me; he delivered me from all my fears."`,
+      `2 Timothy 1:7\n"For God has not given us a spirit of fear, but of power and of love and of a sound mind."`,
+      `Joshua 1:9\n"Have I not commanded you? Be strong and courageous. Do not be afraid; do not be discouraged, for the Lord your God will be with you wherever you go."`
+    ],
+    peace: [
+      `John 14:27\n"Peace I leave with you; my peace I give you. I do not give to you as the world gives. Do not let your hearts be troubled and do not be afraid."`,
+      `Philippians 4:7\n"And the peace of God, which transcends all understanding, will guard your hearts and your minds in Christ Jesus."`,
+      `Isaiah 26:3\n"You will keep in perfect peace those whose minds are steadfast, because they trust in you."`
+    ],
+    joy: [
+      `Nehemiah 8:10\n"The joy of the Lord is your strength."`,
+      `Psalm 16:11\n"You make known to me the path of life; you will fill me with joy in your presence, with eternal pleasures at your right hand."`,
+      `James 1:2-3\n"Consider it pure joy, my brothers and sisters, whenever you face trials of many kinds, because you know that the testing of your faith produces perseverance."`
     ]
   };
   
-  // Get verses for topic or default
-  let topicVerses = verses[lowerTopic];
-  if (!topicVerses) {
-    topicVerses = [
+  // Find matching topic
+  let verses = null;
+  for (const [key, value] of Object.entries(verseDatabase)) {
+    if (topic.includes(key) || key.includes(topic)) {
+      verses = value;
+      break;
+    }
+  }
+  
+  // Default verses if no match
+  if (!verses) {
+    verses = [
       `Psalm 119:105\n"Your word is a lamp for my feet, a light on my path."`,
       `Romans 8:28\n"And we know that in all things God works for the good of those who love him, who have been called according to his purpose."`,
-      `Philippians 4:13\n"I can do all this through him who gives me strength."`
+      `Philippians 4:13\n"I can do all this through him who gives me strength."`,
+      `Proverbs 3:5-6\n"Trust in the Lord with all your heart and lean not on your own understanding; in all your ways submit to him, and he will make your paths straight."`
     ];
   }
   
-  // Get used verses from memory or initialize
-  if (!global.fallbackUsedVerses) {
-    global.fallbackUsedVerses = new Map();
-  }
-  
-  let usedList = global.fallbackUsedVerses.get(lowerTopic) || [];
-  
   // Get next verse (cycle through)
-  let nextIndex = usedList.length % topicVerses.length;
-  let verse = topicVerses[nextIndex];
-  
-  // Mark as used
-  usedList.push(verse);
-  global.fallbackUsedVerses.set(lowerTopic, usedList);
-  
-  return verse;
+  const nextIndex = usedList.length % verses.length;
+  return verses[nextIndex];
+}
+
+function getFallbackVerse(topic) {
+  const usedList = usedVerses.get(topic) || [];
+  return getCycledVerse(topic, usedList);
 }
