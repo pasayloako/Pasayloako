@@ -38,7 +38,7 @@ function generateId() {
 module.exports = {
   meta: {
     name: "Raffle System",
-    description: "Register for raffle and view entries",
+    description: "Register for raffle, view entries, and remove entries",
     author: "Jaybohol",
     version: "1.0.0",
     category: "tools",
@@ -48,18 +48,16 @@ module.exports = {
   
   onStart: async function({ req, res }) {
     try {
-      const { name, gcashnumber, gcashname, action } = req.query;
+      const { name, gcashnumber, gcashname, action, remove } = req.query;
       
       // Handle list command
       if (action === 'list' || req.query.list === 'true') {
         const entries = loadEntries();
         const totalEntries = entries.length;
         
-        // Calculate total amount (assuming ₱50 per entry or custom)
         const amountPerEntry = 50;
         const totalAmount = totalEntries * amountPerEntry;
         
-        // Group entries by date
         const today = new Date().toISOString().split('T')[0];
         const todayEntries = entries.filter(e => e.date === today);
         
@@ -86,6 +84,58 @@ module.exports = {
         });
       }
       
+      // Handle REMOVE by entry number
+      if (remove) {
+        const entryNumber = parseInt(remove);
+        
+        if (isNaN(entryNumber) || entryNumber < 1) {
+          return res.status(400).json({
+            status: false,
+            error: "Invalid entry number. Please provide a valid number.",
+            usage: "/raffle?remove=7"
+          });
+        }
+        
+        const entries = loadEntries();
+        
+        if (entries.length === 0) {
+          return res.status(404).json({
+            status: false,
+            error: "No entries found in the raffle"
+          });
+        }
+        
+        if (entryNumber > entries.length) {
+          return res.status(404).json({
+            status: false,
+            error: `Entry number ${entryNumber} not found`,
+            total_entries: entries.length,
+            valid_range: `1 to ${entries.length}`
+          });
+        }
+        
+        // Get the entry to remove (array index = entryNumber - 1)
+        const removedEntry = entries[entryNumber - 1];
+        
+        // Remove the entry
+        entries.splice(entryNumber - 1, 1);
+        saveEntries(entries);
+        
+        return res.json({
+          status: true,
+          message: `Successfully removed entry #${entryNumber}`,
+          removed_entry: {
+            number: entryNumber,
+            name: removedEntry.name,
+            gcash_number: removedEntry.gcashnumber,
+            gcash_name: removedEntry.gcashname,
+            registered_at: removedEntry.timestamp
+          },
+          remaining_entries: entries.length,
+          note: "Entry numbers have been reordered. Use /raffle?action=list to see updated list."
+        });
+      }
+      
       // Handle registration
       if (!name) {
         return res.status(400).json({
@@ -94,6 +144,7 @@ module.exports = {
           usage: {
             register: "/raffle?name=Jay Kizuu&gcashnumber=09916527333&gcashname=J...B",
             list: "/raffle?action=list",
+            remove: "/raffle?remove=7",
             check: "/raffle?action=check&name=Jay Kizuu"
           }
         });
@@ -124,7 +175,7 @@ module.exports = {
         });
       }
       
-      // Check for duplicate name (optional - can allow multiple entries)
+      // Check for duplicate name
       const entries = loadEntries();
       const existingEntry = entries.find(e => e.name.toLowerCase() === name.toLowerCase());
       
