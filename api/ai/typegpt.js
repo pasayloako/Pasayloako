@@ -3,7 +3,7 @@ const conversations = new Map();
 
 const meta = {
   name: 'TypeGPT',
-  path: '/typegpt?query=&uid=&model=&system=',
+  path: '/typegpt?query=&uid=&model=',
   method: 'get',
   category: 'ai',
   description: ''
