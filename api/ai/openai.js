@@ -19,7 +19,7 @@ ensureMemoryDirExists();
 
 // OpenAI API Key - DIRECTLY HARDCODE (since you want to avoid dotenv)
 // IMPORTANT: In production, use environment variables. Hardcoding is for testing only.
-const OPENAI_API_KEY = "YOUR_OPENAI_API_KEY_HERE"; // <-- PUT YOUR API KEY HERE
+const OPENAI_API_KEY = "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"; // <-- PUT YOUR API KEY HERE
 
 const meta = {
     name: 'OpenAI Chat',
