@@ -2,6 +2,7 @@
 
 const axios = require("axios");
 const FormData = require("form-data");
+const crypto = require("crypto");
 
 module.exports = {
   meta: {
@@ -23,11 +24,10 @@ module.exports = {
           status: false,
           operator: "Jaybohol",
           error: "Text is required",
-          usage: "/dracin/tts?text=Hello%20World&speed=1.0&music=true&volume=0.3"
+          usage: "/dracin/tts?text=Hello%20World"
         });
       }
       
-      // Validate text length
       if (text.length > 500) {
         return res.status(413).json({
           status: false,
@@ -35,7 +35,6 @@ module.exports = {
         });
       }
       
-      // Parse parameters
       let parsedSpeed = parseFloat(speed);
       if (isNaN(parsedSpeed) || parsedSpeed < 0.5 || parsedSpeed > 2.0) parsedSpeed = 1.0;
       
@@ -48,8 +47,8 @@ module.exports = {
       // Generate TTS audio
       const audioBuffer = await generateDracinTTS(text, parsedSpeed, useBg, bgVol);
       
-      // Upload to Uguu.se
-      const audioUrl = await uploadToUguu(audioBuffer);
+      // Upload to PixelDrain
+      const audioUrl = await uploadToPixelDrain(audioBuffer);
       
       // Stream directly if requested
       if (stream === "true") {
@@ -76,34 +75,12 @@ module.exports = {
     } catch (error) {
       console.error("Dracin TTS Error:", error.message);
       
-      // Fallback: Return base64 if upload fails
-      try {
-        const audioBuffer = await generateDracinTTS(text, parsedSpeed, useBg, bgVol);
-        const base64Audio = audioBuffer.toString('base64');
-        
-        res.json({
-          status: true,
-          operator: "Jaybohol",
-          result: {
-            text: text,
-            audio: `data:audio/mpeg;base64,${base64Audio}`,
-            settings: {
-              speed: parsedSpeed,
-              background_music: useBg,
-              music_volume: bgVol
-            },
-            note: "Base64 audio (upload service unavailable)"
-          },
-          timestamp: new Date().toISOString()
-        });
-      } catch (fallbackError) {
-        res.status(500).json({
-          status: false,
-          operator: "Jaybohol",
-          error: error.message,
-          timestamp: new Date().toISOString()
-        });
-      }
+      res.status(500).json({
+        status: false,
+        operator: "Jaybohol",
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
     }
   }
 };
@@ -130,7 +107,6 @@ async function generateDracinTTS(text, speed = 1.0, useBg = true, bgVol = 0.3) {
     
     const audioBuffer = Buffer.from(response.data);
     
-    // Check if the buffer contains valid MP3 data
     if (audioBuffer.length < 1000) {
       throw new Error("Generated audio is invalid or corrupted");
     }
@@ -138,56 +114,62 @@ async function generateDracinTTS(text, speed = 1.0, useBg = true, bgVol = 0.3) {
     return audioBuffer;
   } catch (error) {
     console.error("Dracin TTS API Error:", error.message);
-    
-    if (error.response) {
-      throw new Error(`External API Error: ${error.response.status} - ${error.response.statusText}`);
-    }
-    throw new Error(`Dracin TTS External API Error: ${error.message}`);
+    throw new Error(`Failed to generate Dracin TTS: ${error.message}`);
   }
 }
 
-// ============= UGUU.SE UPLOAD =============
+// ============= PIXELDRAIN UPLOAD (WORKING) =============
 
-async function uploadToUguu(buffer) {
+async function uploadToPixelDrain(buffer) {
   try {
-    const formData = new FormData();
-    formData.append('files[]', buffer, { filename: `dracin-${Date.now()}.mp3` });
+    // Generate unique file ID
+    const fileId = crypto.randomBytes(16).toString('hex');
     
-    const response = await axios.post('https://uguu.se/upload', formData, {
+    // Upload to PixelDrain using PUT method
+    const response = await axios.put(`https://pixeldrain.com/api/file/${fileId}`, buffer, {
       headers: {
-        ...formData.getHeaders(),
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': buffer.length
       },
-      timeout: 30000
+      timeout: 30000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
     });
     
-    // Uguu.se returns different response formats
-    let url = null;
-    
-    if (typeof response.data === 'string') {
-      // Text response (csv or plain text)
-      const lines = response.data.trim().split('\n');
-      if (lines[0] && lines[0].startsWith('http')) {
-        url = lines[0].trim();
-      }
-    } else if (response.data && response.data.files && response.data.files[0]) {
-      // JSON response
-      url = response.data.files[0].url;
-    } else if (response.data && response.data.url) {
-      url = response.data.url;
-    } else if (Array.isArray(response.data) && response.data[0]) {
-      url = response.data[0].url || response.data[0];
+    if (response.status === 200 || response.status === 201) {
+      const downloadUrl = `https://pixeldrain.com/api/file/${fileId}?download`;
+      console.log(`✅ Uploaded to PixelDrain: ${downloadUrl}`);
+      return downloadUrl;
     }
     
-    if (url && url.startsWith('http')) {
-      console.log(`✅ Uploaded to Uguu.se: ${url}`);
-      return url;
-    }
-    
-    throw new Error("Uguu.se upload failed: Invalid response format");
+    throw new Error(`Upload failed with status: ${response.status}`);
     
   } catch (error) {
-    console.error("Uguu.se Upload Error:", error.message);
-    throw new Error("Failed to upload audio to Uguu.se");
+    console.error("PixelDrain Upload Error:", error.message);
+    
+    // Alternative upload method using POST
+    try {
+      const formData = new FormData();
+      formData.append('file', buffer, { filename: `dracin-${Date.now()}.mp3` });
+      
+      const altResponse = await axios.post('https://pixeldrain.com/api/file', formData, {
+        headers: formData.getHeaders(),
+        timeout: 30000,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      });
+      
+      if (altResponse.data && altResponse.data.id) {
+        const downloadUrl = `https://pixeldrain.com/api/file/${altResponse.data.id}?download`;
+        console.log(`✅ Uploaded to PixelDrain (alternative): ${downloadUrl}`);
+        return downloadUrl;
+      }
+      
+      throw new Error("All upload methods failed");
+      
+    } catch (altError) {
+      console.error("PixelDrain Alternative Error:", altError.message);
+      throw new Error("Failed to upload audio to PixelDrain");
+    }
   }
 }
