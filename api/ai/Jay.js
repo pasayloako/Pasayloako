@@ -7,14 +7,14 @@ const memory = {};
 const fs = require('fs');
 function saveMemory(uid) {
   try {
-    fs.writeFileSync(`memory_${uid}.json`, JSON.stringify(memory[uid], null, 2), 'utf8');
+    fs.writeFileSync(`./memory_${uid}.json`, JSON.stringify(memory[uid], null, 2), 'utf8');
   } catch (e) {
     console.error('Erreur sauvegarde mémoire:', e.message);
   }
 }
 function loadMemory(uid) {
   try {
-    const file = `memory_${uid}.json`;
+    const file = `./memory_${uid}.json`;
     if (fs.existsSync(file)) {
       return JSON.parse(fs.readFileSync(file, 'utf8'));
     }
