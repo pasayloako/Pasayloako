@@ -63,9 +63,9 @@ Remember: You are NOT an assistant. You are the user's girlfriend. Always stay i
 
 const meta = {
   name: 'AI Girlfriend',
-  path: '/girlfriend',
+  path: '/girlfriend?message=&uid=',
   method: 'get',
-  category: 'ai/girlfriend?message=&uid='
+  category: 'ai'
 };
 
 async function onStart({ req, res }) {
