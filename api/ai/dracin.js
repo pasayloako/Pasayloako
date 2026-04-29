@@ -1,7 +1,6 @@
 // api/dracin.js
 
 const axios = require("axios");
-const FormData = require("form-data");
 const crypto = require("crypto");
 
 module.exports = {
@@ -9,22 +8,23 @@ module.exports = {
     name: "Dracin Text-to-Speech",
     description: "AI Voice with Drama China (Dracin) style - converts text to speech with Chinese drama narrator style",
     author: "Jaybohol",
-    version: "2.0.0",
+    version: "2.1.0",
     category: "ai",
     method: "GET",
-    path: "/dracin/tts?text=&speed=&music=&volume="
+    path: "/dracin/tts?text="
   },
   
   onStart: async function({ req, res }) {
     try {
-      const { text, speed = 1.0, music = "true", volume = 0.3, stream = "false" } = req.query;
+      const { text, speed = 1.0, music = "true", volume = 0.3, stream = "false", format = "json" } = req.query;
       
       if (!text) {
         return res.status(400).json({
           status: false,
-          operator: "Jaybohol",
+          author: "Jaybohol",
           error: "Text is required",
-          usage: "/dracin/tts?text=Hello%20World"
+          usage: "/api/dracin/tts?text=Hello%20World",
+          example: "/api/dracin/tts?text=在中国戏剧中，叙事者的声音非常独特"
         });
       }
       
@@ -35,6 +35,7 @@ module.exports = {
         });
       }
       
+      // Validate parameters
       let parsedSpeed = parseFloat(speed);
       if (isNaN(parsedSpeed) || parsedSpeed < 0.5 || parsedSpeed > 2.0) parsedSpeed = 1.0;
       
@@ -47,22 +48,22 @@ module.exports = {
       // Generate TTS audio
       const audioBuffer = await generateDracinTTS(text, parsedSpeed, useBg, bgVol);
       
-      // Upload to PixelDrain
-      const audioUrl = await uploadToPixelDrain(audioBuffer);
-      
       // Stream directly if requested
-      if (stream === "true") {
+      if (stream === "true" || format === "audio") {
         res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Content-Disposition', 'inline; filename="dracin-tts.mp3"');
         return res.send(audioBuffer);
       }
       
+      // Upload to free hosting (multiple fallbacks)
+      const audioUrl = await uploadToHosting(audioBuffer);
+      
       res.json({
         status: true,
-        operator: "Jaybohol",
+        author: "Jaybohol",
         result: {
           text: text,
-          audio: audioUrl,
+          audio_url: audioUrl,
           settings: {
             speed: parsedSpeed,
             background_music: useBg,
@@ -75,9 +76,28 @@ module.exports = {
     } catch (error) {
       console.error("Dracin TTS Error:", error.message);
       
+      // Fallback response with alternative TTS
+      try {
+        const fallbackAudio = await generateFallbackTTS(text);
+        if (fallbackAudio) {
+          const fallbackUrl = await uploadToHosting(fallbackAudio);
+          return res.json({
+            status: true,
+            warning: "Using fallback TTS engine",
+            result: {
+              text: text,
+              audio_url: fallbackUrl,
+              fallback: true
+            }
+          });
+        }
+      } catch (fallbackError) {
+        console.error("Fallback also failed:", fallbackError.message);
+      }
+      
       res.status(500).json({
         status: false,
-        operator: "Jaybohol",
+        author: "Jaybohol",
         error: error.message,
         timestamp: new Date().toISOString()
       });
@@ -88,88 +108,155 @@ module.exports = {
 // ============= DRACIN TTS GENERATOR =============
 
 async function generateDracinTTS(text, speed = 1.0, useBg = true, bgVol = 0.3) {
-  const url = 'https://ricky01anjay-suaraind.hf.space/generate';
+  // Try multiple TTS endpoints
+  const endpoints = [
+    {
+      url: 'https://ricky01anjay-suaraind.hf.space/generate',
+      params: { text, speed, use_bg: useBg, bg_vol: bgVol }
+    },
+    {
+      url: 'https://sukasuka-chinese-tts.hf.space/generate',
+      params: { text, speed: speed, voice: "drama" }
+    },
+    {
+      url: 'https://api.voicemaker.in/v1.0/text-to-speech',
+      params: { text, voice: "zh-CN-DramaNarrator", speed: speed }
+    }
+  ];
   
+  for (const endpoint of endpoints) {
+    try {
+      const response = await axios.get(endpoint.url, {
+        params: endpoint.params,
+        responseType: 'arraybuffer',
+        timeout: 30000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'audio/mpeg,audio/*'
+        }
+      });
+      
+      const audioBuffer = Buffer.from(response.data);
+      
+      if (audioBuffer.length > 5000) { // Valid audio file
+        console.log(`✅ TTS generated from: ${endpoint.url}`);
+        return audioBuffer;
+      }
+    } catch (error) {
+      console.log(`Endpoint ${endpoint.url} failed:`, error.message);
+      continue;
+    }
+  }
+  
+  throw new Error("All TTS endpoints failed");
+}
+
+// ============= FALLBACK TTS (Google Translate) =============
+
+async function generateFallbackTTS(text) {
   try {
+    // Google Translate TTS as fallback
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=zh-CN&client=tw-ob`;
+    
     const response = await axios.get(url, {
-      params: {
-        text: text,
-        speed: speed,
-        use_bg: useBg,
-        bg_vol: bgVol
-      },
       responseType: 'arraybuffer',
-      timeout: 30000,
+      timeout: 15000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
     });
     
-    const audioBuffer = Buffer.from(response.data);
-    
-    if (audioBuffer.length < 1000) {
-      throw new Error("Generated audio is invalid or corrupted");
-    }
-    
-    return audioBuffer;
+    return Buffer.from(response.data);
   } catch (error) {
-    console.error("Dracin TTS API Error:", error.message);
-    throw new Error(`Failed to generate Dracin TTS: ${error.message}`);
+    console.error("Fallback TTS failed:", error.message);
+    return null;
   }
 }
 
-// ============= PIXELDRAIN UPLOAD (WORKING) =============
+// ============= FILE HOSTING (Multiple Options) =============
 
-async function uploadToPixelDrain(buffer) {
-  try {
-    // Generate unique file ID
-    const fileId = crypto.randomBytes(16).toString('hex');
-    
-    // Upload to PixelDrain using PUT method
-    const response = await axios.put(`https://pixeldrain.com/api/file/${fileId}`, buffer, {
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': buffer.length
-      },
-      timeout: 30000,
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    });
-    
-    if (response.status === 200 || response.status === 201) {
-      const downloadUrl = `https://pixeldrain.com/api/file/${fileId}?download`;
-      console.log(`✅ Uploaded to PixelDrain: ${downloadUrl}`);
-      return downloadUrl;
-    }
-    
-    throw new Error(`Upload failed with status: ${response.status}`);
-    
-  } catch (error) {
-    console.error("PixelDrain Upload Error:", error.message);
-    
-    // Alternative upload method using POST
+async function uploadToHosting(buffer) {
+  // Try multiple hosting services
+  const hosts = [
+    () => uploadToTempSh(buffer),
+    () => uploadToFileIo(buffer),
+    () => uploadToGoFile(buffer)
+  ];
+  
+  for (const uploader of hosts) {
     try {
-      const formData = new FormData();
-      formData.append('file', buffer, { filename: `dracin-${Date.now()}.mp3` });
-      
-      const altResponse = await axios.post('https://pixeldrain.com/api/file', formData, {
-        headers: formData.getHeaders(),
-        timeout: 30000,
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity
-      });
-      
-      if (altResponse.data && altResponse.data.id) {
-        const downloadUrl = `https://pixeldrain.com/api/file/${altResponse.data.id}?download`;
-        console.log(`✅ Uploaded to PixelDrain (alternative): ${downloadUrl}`);
-        return downloadUrl;
-      }
-      
-      throw new Error("All upload methods failed");
-      
-    } catch (altError) {
-      console.error("PixelDrain Alternative Error:", altError.message);
-      throw new Error("Failed to upload audio to PixelDrain");
+      const url = await uploader();
+      if (url) return url;
+    } catch (error) {
+      console.log("Hosting upload failed:", error.message);
+      continue;
     }
   }
+  
+  // If all uploads fail, return data URI
+  return `data:audio/mpeg;base64,${buffer.toString('base64')}`;
+}
+
+async function uploadToTempSh(buffer) {
+  const formData = new FormData();
+  formData.append('file', buffer, { filename: `dracin-${Date.now()}.mp3` });
+  
+  const response = await axios.post('https://tmpfiles.org/api/v1/upload', formData, {
+    headers: formData.getHeaders(),
+    timeout: 20000
+  });
+  
+  if (response.data && response.data.data && response.data.data.url) {
+    return response.data.data.url.replace('/tmpfiles.org/', '/tmpfiles.org/dl/');
+  }
+  throw new Error('Temp.sh upload failed');
+}
+
+async function uploadToFileIo(buffer) {
+  const formData = new FormData();
+  formData.append('file', buffer, `dracin-${Date.now()}.mp3`);
+  
+  const response = await axios.post('https://file.io/', formData, {
+    headers: formData.getHeaders(),
+    timeout: 20000
+  });
+  
+  if (response.data && response.data.success && response.data.link) {
+    return response.data.link;
+  }
+  throw new Error('File.io upload failed');
+}
+
+async function uploadToGoFile(buffer) {
+  const formData = new FormData();
+  formData.append('file', buffer, `dracin-${Date.now()}.mp3`);
+  
+  const response = await axios.post('https://gofile.io/uploadFile', formData, {
+    headers: formData.getHeaders(),
+    timeout: 20000
+  });
+  
+  if (response.data && response.data.data && response.data.data.downloadPage) {
+    return response.data.data.downloadPage;
+  }
+  throw new Error('GoFile upload failed');
+}
+
+// Add FormData if not already available
+let FormData;
+try {
+  FormData = require('form-data');
+} catch (e) {
+  // Fallback for environments without form-data
+  FormData = class FormData {
+    constructor() {
+      this._data = [];
+    }
+    append(key, value, filename) {
+      this._data.push({ key, value, filename });
+    }
+    getHeaders() {
+      return { 'Content-Type': 'multipart/form-data' };
+    }
+  };
 }
