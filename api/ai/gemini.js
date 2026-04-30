@@ -8,7 +8,6 @@ let config = {
     bl: "boq_assistant-bard-web-server_20260208.13_p0",
     firebase_url: "https://puru-tools-default-rtdb.firebaseio.com/sessions/google.json",
 
-    // Memory context
     conversation_id: "",
     response_id: "",
     choice_id: ""
@@ -74,11 +73,18 @@ function parseGeminiResponse(rawData) {
 async function askGemini(prompt, retry = true) {
     if (retry) await syncFirebase('GET');
 
+    // FORCE ENGLISH by adding system instruction to prompt
+    const englishPrompt = `[IMPORTANT: You must respond in ENGLISH only. Do not use Hindi, Urdu, or any other language. Respond as a helpful AI assistant named Gemini, not as a girlfriend or romantic partner. Use professional, friendly English. Your response should be in English ONLY.]
+
+User question: ${prompt}
+
+Answer in English:`;
+
     const url = `https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate`;
     const reqData = [
         null, 
         JSON.stringify([
-            [prompt, 0, null, null, null, null, 0], 
+            [englishPrompt, 0, null, null, null, null, 0], 
             ["id"], 
             [config.conversation_id, config.response_id, config.choice_id, null, null, null, null, null, null, ""], 
             ""
@@ -106,7 +112,48 @@ async function askGemini(prompt, retry = true) {
             }
         );
 
-        const parsed = parseGeminiResponse(response.data);
+        let parsed = parseGeminiResponse(response.data);
+        
+        // Additional cleaning of non-English responses
+        if (parsed.text) {
+            // Remove common Hindi words and romantic roleplay
+            const hindiWords = /(tum|aap|hai|na|ho|kyun|kya|itna|mere|paas|aao|jaan|khushi|pyaar|pooch|rahe|wahi|purani|karti|acha|bhi|kar|dil|main|sirf|tumhari)/gi;
+            const romanticPattern = /[😉💕😘🙈💖🥺❤️]+/g;
+            
+            // If response contains too much Hindi, force a clean response
+            if (parsed.text.match(hindiWords) || parsed.text.match(romanticPattern)) {
+                // Send a follow-up request to force English
+                const forceEnglishPrompt = `[URGENT: You previously responded in Hindi/romantic style. I need a PROFESSIONAL ENGLISH response. Answer this question in plain English only, no emojis, no romantic talk, no Hindi words: ${prompt}]`;
+                
+                const retryData = [
+                    null, 
+                    JSON.stringify([
+                        [forceEnglishPrompt, 0, null, null, null, null, 0], 
+                        ["id"], 
+                        ["", "", "", null, null, null, null, null, null, ""], 
+                        ""
+                    ])
+                ];
+                
+                const retryResponse = await axios.post(`${url}?${params.toString()}`, 
+                    `f.req=${encodeURIComponent(JSON.stringify(retryData))}&at=${encodeURIComponent(config.snlm0e)}&`, 
+                    {
+                        headers: {
+                            'Cookie': config.cookie,
+                            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; RMX2185) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36',
+                            'Referer': 'https://gemini.google.com/',
+                        },
+                        timeout: 30000
+                    }
+                );
+                
+                const cleanParsed = parseGeminiResponse(retryResponse.data);
+                if (cleanParsed.text && !cleanParsed.text.match(hindiWords)) {
+                    parsed.text = cleanParsed.text;
+                }
+            }
+        }
 
         if (!parsed.text) {
             throw new Error("EmptyResponse");
@@ -132,18 +179,16 @@ async function askGemini(prompt, retry = true) {
             await new Promise(r => setTimeout(r, 2000));
             return askGemini(prompt, false); 
         } else {
-            throw new Error("Failed after session reset. Check cookie/token.");
+            throw new Error("Failed after session reset.");
         }
     }
 }
 
-// ============= YOUR API STRUCTURE =============
-
 const meta = {
     name: "Gemini AI",
-    description: "Google Gemini AI assistant with conversation memory",
+    description: "Google Gemini AI assistant - English only responses",
     author: "Jaybohol",
-    version: "1.0.0",
+    version: "2.0.0",
     category: "ai",
     method: "GET",
     path: "/gemini?prompt=&uid="
@@ -184,7 +229,11 @@ async function onStart({ req, res }) {
             status: false,
             author: "Jaybohol",
             error: error.message,
-            suggestion: "Try again later or check your internet connection"
+            result: {
+                prompt: prompt,
+                response: "I'm Gemini, an AI assistant created by Google. How can I help you today?",
+                uid: uid
+            }
         });
     }
 }
