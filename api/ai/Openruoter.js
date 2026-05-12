@@ -3,7 +3,7 @@ const fs = require('fs').promises;
 const path = require('path');
 
 // Directory to store memory files
-const memoryDir = './memory';
+const memoryDir = require('path').join(__dirname, '../../memory');
 
 // Ensure the memory directory exists
 async function ensureMemoryDirExists() {
@@ -11,7 +11,7 @@ async function ensureMemoryDirExists() {
         await fs.mkdir(memoryDir, { recursive: true });
     } catch (error) {
         console.error('Error creating memory directory:', error.message);
-        process.exit(1);
+
     }
 }
 
