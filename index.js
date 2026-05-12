@@ -203,9 +203,10 @@ app.use((err, req, res, next) => {
   res.status(500).sendFile(path.join(__dirname, 'web', '500.html'));
 });
 
-// Start server
-const server = app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production' || process.env.RENDER) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+}
 
 module.exports = app;
