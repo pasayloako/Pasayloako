@@ -1,8 +1,0 @@
-build:
-  command: npm install --production=false
-
-run:
-  command: node index.js
-
-http:
-  port: 8080
