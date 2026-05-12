@@ -21,6 +21,12 @@ const limiter = rateLimit({
   }
 });
 
+// ============= FAVICON FIX =============
+// Prevent crashes on favicon requests
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+app.get('/favicon.png', (req, res) => res.status(204).end());
+app.get('/favicon.svg', (req, res) => res.status(204).end());
+
 app.use('/', express.static(path.join(__dirname, 'web')));
 
 app.get('/', limiter, (req, res) => {
@@ -131,11 +137,17 @@ app.get('/docs', limiter, (req, res) => {
   res.sendFile(path.join(__dirname, 'web', 'docs.html'));
 });
 
+// ============= 404 Handler Update =============
 app.use((req, res) => {
+  // Don't log favicon 404s
+  if (req.url === '/favicon.ico' || req.url === '/favicon.png' || req.url === '/favicon.svg') {
+    return res.status(204).end();
+  }
   res.status(404).sendFile(path.join(__dirname, 'web', '404.html'));
 });
 
 app.use((err, req, res, next) => {
+  console.error('Server Error:', err);
   res.status(500).sendFile(path.join(__dirname, 'web', '500.html'));
 });
 
