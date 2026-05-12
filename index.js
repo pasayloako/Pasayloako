@@ -1,3 +1,17 @@
+const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+if (!fs.existsSync(path.join(__dirname, 'node_modules', 'express'))) {
+  console.log('node_modules missing, running npm install...');
+  try {
+    execSync('npm install', { stdio: 'inherit', cwd: __dirname });
+    console.log('npm install completed');
+  } catch(e) {
+    console.error('npm install failed:', e.message);
+  }
+}
+
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -203,10 +217,9 @@ app.use((err, req, res, next) => {
   res.status(500).sendFile(path.join(__dirname, 'web', '500.html'));
 });
 
-if (process.env.NODE_ENV !== 'production' || process.env.RENDER) {
-  app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-  });
-}
+// Start server
+const server = app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
 
 module.exports = app;
